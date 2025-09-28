@@ -151,3 +151,119 @@ contract MerkleDistributor is Ownable2Step, ReentrancyGuard {
         IERC20(token).safeTransfer(to, amount);
     }
 }
+
+/**
+ * @title D223 Root Manager
+ * @notice Publishes epoch+pool Merkle roots (with optional timelock) to a MerkleDistributor.
+ *         Path A (MVP): set minDelay=0 and call `commitRoot` directly (multisig owner).
+ *         Path B (Pro): set a >0 minDelay, queue with `queueRoot`, then `executeRoot` after ETA.
+ */
+
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
+
+interface IMerkleDistributor {
+    function setRoot(uint48 epoch, uint8 pool, bytes32 merkleRoot, address token, string calldata epochCid) external;
+}
+
+contract RootManager is Ownable2Step {
+    IMerkleDistributor public immutable distributor;
+    uint48 public minDelay; // seconds; 0 for immediate
+
+    constructor(address _distributor, uint48 _minDelay, address initialOwner) Ownable(initialOwner) {
+        require(_distributor != address(0), "distributor=0");
+        distributor = IMerkleDistributor(_distributor);
+        minDelay = _minDelay;
+    }
+
+    function setMinDelay(uint48 newDelay) external onlyOwner {
+        minDelay = newDelay;
+        emit MinDelayUpdated(newDelay);
+    }
+
+    // ------------ Path A: immediate commit ------------
+
+    function commitRoot(
+        uint48 epoch,
+        uint8 pool,
+        bytes32 merkleRoot,
+        address token,
+        string calldata epochCid
+    ) external onlyOwner {
+        require(minDelay == 0, "delay>0 use queue");
+        distributor.setRoot(epoch, pool, merkleRoot, token, epochCid);
+        emit RootCommitted(epoch, pool, merkleRoot, token, epochCid);
+    }
+
+    // ------------ Path B: timelocked queue ------------
+
+    struct RootProposal {
+        uint256 id;
+        uint48 epoch;
+        uint8 pool;
+        bytes32 merkleRoot;
+        address token;
+        string epochCid;
+        uint48 eta;      // earliest execution time
+        bool executed;
+    }
+
+    uint256 public nextId = 1;
+    mapping(uint256 => RootProposal) public proposals;
+
+    function queueRoot(
+        uint48 epoch,
+        uint8 pool,
+        bytes32 merkleRoot,
+        address token,
+        string calldata epochCid,
+        uint48 eta
+    ) external onlyOwner returns (uint256 id) {
+        require(minDelay > 0, "delay=0 use commit");
+        require(eta >= uint48(block.timestamp) + minDelay, "eta too soon");
+        id = nextId++;
+        proposals[id] = RootProposal({
+            id: id,
+            epoch: epoch,
+            pool: pool,
+            merkleRoot: merkleRoot,
+            token: token,
+            epochCid: epochCid,
+            eta: eta,
+            executed: false
+        });
+        emit RootQueued(id, epoch, pool, merkleRoot, token, epochCid, eta);
+    }
+
+    function executeRoot(uint256 id) external onlyOwner {
+        RootProposal storage p = proposals[id];
+        require(p.id != 0, "no proposal");
+        require(!p.executed, "executed");
+        require(p.eta <= uint48(block.timestamp), "eta not reached");
+
+        p.executed = true;
+        distributor.setRoot(p.epoch, p.pool, p.merkleRoot, p.token, p.epochCid);
+        emit RootExecuted(id, p.epoch, p.pool, p.merkleRoot, p.token, p.epochCid);
+    }
+
+    // ------------ Events ------------
+
+    event MinDelayUpdated(uint48 newDelay);
+    event RootCommitted(uint48 indexed epoch, uint8 indexed pool, bytes32 merkleRoot, address token, string epochCid);
+    event RootQueued(
+        uint256 indexed id,
+        uint48 indexed epoch,
+        uint8 indexed pool,
+        bytes32 merkleRoot,
+        address token,
+        string epochCid,
+        uint48 eta
+    );
+    event RootExecuted(
+        uint256 indexed id,
+        uint48 indexed epoch,
+        uint8 indexed pool,
+        bytes32 merkleRoot,
+        address token,
+        string epochCid
+    );
+}
