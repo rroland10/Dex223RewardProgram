@@ -1,0 +1,38 @@
+{
+  "name": "dex223-reward-program",
+  "version": "1.0.0",
+  "description": "Enhanced Dex223 — ERC223 Token + Advanced Merkle-based Rewards Distributor",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy": "hardhat run scripts/deploy.js",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "deploy:mainnet": "hardhat run scripts/deploy.js --network mainnet",
+    "verify": "hardhat verify",
+    "coverage": "hardhat coverage",
+    "size": "hardhat size-contracts"
+  },
+  "keywords": [
+    "ethereum",
+    "smart-contracts",
+    "erc223",
+    "merkle-tree",
+    "rewards",
+    "dex223"
+  ],
+  "author": "Dex223",
+  "license": "GPL-3.0-or-later",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "hardhat": "^2.19.0",
+    "hardhat-contract-sizer": "^2.10.0",
+    "hardhat-gas-reporter": "^1.0.9",
+    "merkletreejs": "^0.4.0",
+    "solidity-coverage": "^0.8.5"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0"
+  }
+}
