@@ -307,3 +307,88 @@ contract ReferralRegistry is AccessControl {
         emit ReferralImported(referee, referrer);
     }
 }
+
+/**
+ * @title D223 Wallet Linker (EIP-712)
+ * @notice Consent-based linking of secondary wallets into a "cluster" under a primary.
+ *         The *linked* wallet must sign an EIP-712 message authorizing linkage.
+ *         Unlink can be done by primary or the linked wallet.
+ */
+
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+
+contract WalletLinker is EIP712 {
+    using ECDSA for bytes32;
+
+    string private constant NAME = "D223 WalletLinker";
+    string private constant VERSION = "1";
+    bytes32 private constant LINK_TYPEHASH =
+        keccak256("Link(address primary,address linked,uint256 nonce,uint256 deadline)");
+
+    // linked => primary
+    mapping(address => address) public linkedTo;
+    // primary => cluster members (does not include primary itself)
+    mapping(address => address[]) private clusterMembers;
+    // nonces per linked wallet for replay protection
+    mapping(address => uint256) public nonces;
+
+    event Linked(address indexed primary, address indexed linked);
+    event Unlinked(address indexed primary, address indexed linked);
+
+    constructor() EIP712(NAME, VERSION) {}
+
+    function domainSeparator() external view returns (bytes32) {
+        return _domainSeparatorV4();
+    }
+
+    /// @notice Link a wallet into a primary's cluster using a signature from the linked wallet.
+    function linkWithSig(
+        address primary,
+        address linked,
+        uint256 deadline,
+        uint8 v, bytes32 r, bytes32 s
+    ) external {
+        require(primary != address(0) && linked != address(0), "zero addr");
+        require(primary != linked, "self");
+        require(block.timestamp <= deadline, "expired");
+        require(linkedTo[linked] == address(0), "already linked");
+
+        uint256 nonce = nonces[linked];
+        bytes32 structHash = keccak256(abi.encode(LINK_TYPEHASH, primary, linked, nonce, deadline));
+        bytes32 digest = _hashTypedDataV4(structHash);
+        address signer = ECDSA.recover(digest, v, r, s);
+        require(signer == linked, "bad sig");
+
+        nonces[linked] = nonce + 1;
+        linkedTo[linked] = primary;
+        clusterMembers[primary].push(linked);
+        emit Linked(primary, linked);
+    }
+
+    /// @notice Unlink a member from a cluster. Callable by the primary or the member itself.
+    function unlink(address member) external {
+        address primary = linkedTo[member];
+        require(primary != address(0), "not linked");
+        require(msg.sender == primary || msg.sender == member, "no auth");
+
+        // clear mapping
+        linkedTo[member] = address(0);
+
+        // remove from array (swap & pop)
+        address[] storage arr = clusterMembers[primary];
+        for (uint256 i = 0; i < arr.length; i++) {
+            if (arr[i] == member) {
+                arr[i] = arr[arr.length - 1];
+                arr.pop();
+                break;
+            }
+        }
+
+        emit Unlinked(primary, member);
+    }
+
+    function getCluster(address primary) external view returns (address[] memory) {
+        return clusterMembers[primary];
+    }
+}
