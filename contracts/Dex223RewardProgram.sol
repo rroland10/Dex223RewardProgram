@@ -267,3 +267,43 @@ contract RootManager is Ownable2Step {
         string epochCid
     );
 }
+
+/**
+ * @title D223 Referral Registry
+ * @notice One-time, wallet-bound referral mapping. Simple anti-self rule. No KYC, no rewards logic on-chain.
+ *         Off-chain engine uses this mapping to calculate decayed/capped rewards.
+ */
+
+import "@openzeppelin/contracts/access/AccessControl.sol";
+
+contract ReferralRegistry is AccessControl {
+    bytes32 public constant IMPORTER_ROLE = keccak256("IMPORTER_ROLE");
+
+    // referee => referrer
+    mapping(address => address) public referrerOf;
+
+    event ReferralSet(address indexed referee, address indexed referrer);
+    event ReferralImported(address indexed referee, address indexed referrer);
+
+    constructor(address admin) {
+        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+    }
+
+    /// @notice A user sets their referrer (once). Cannot be self, cannot overwrite.
+    function setReferrer(address referrer) external {
+        require(referrer != address(0), "referrer=0");
+        require(referrer != msg.sender, "self-referral");
+        require(referrerOf[msg.sender] == address(0), "already set");
+        referrerOf[msg.sender] = referrer;
+        emit ReferralSet(msg.sender, referrer);
+    }
+
+    /// @notice Admin/Importer can backfill from legacy systems. Won't overwrite existing.
+    function importReferral(address referee, address referrer) external onlyRole(IMPORTER_ROLE) {
+        require(referee != address(0) && referrer != address(0), "zero addr");
+        require(referee != referrer, "self");
+        require(referrerOf[referee] == address(0), "exists");
+        referrerOf[referee] = referrer;
+        emit ReferralImported(referee, referrer);
+    }
+}
